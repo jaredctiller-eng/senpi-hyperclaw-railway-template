@@ -104,14 +104,9 @@ Read the file and check the `state` field:
 
 - **`state` is `"READY"`** → skip to step 5 (no onboarding needed).
 - **`state` is an explicit non-READY value** (`"FRESH"`, `"ONBOARDING"`, `"UNFUNDED"`, `"AWAITING_FIRST_TRADE"`, `"FAILED"`) → proceed to step 4.
-- **`state` is missing, null, or the file is `{}`** → the local cache is empty or stale (e.g. fresh deploy, volume reset, or cache eviction). **This does NOT mean the user is not onboarded.** The MCP is the authoritative source of truth. Call `mcp__senpi__user_get_me` (no arguments):
-  - **If it returns a valid user profile** (a `userId` or `privyId` is present in the response) → the account IS already connected and set up. **Write `{"state":"READY"}` to `state.json`** to hydrate the local cache, then skip to step 5. Do not proceed to step 4.
-  - **If it returns an authentication or authorization error** (HTTP 401/403, "token expired", "invalid token", or similar) → the token is invalid; proceed to step 4.
-  - **If the call fails for any other technical reason** (network error, server error) → proceed to step 4.
+- **`state` is missing, null, the file is `{}`, or the file does not exist** → the local cache is stale or was never written (e.g. fresh deploy, volume reset). **Do NOT treat this as "setup required".** Step 2 already confirmed a working Senpi MCP connection by successfully retrieving the user profile — that is sufficient proof the account is connected. Write `{"state":"READY"}` to `state.json` to hydrate the local cache, then **skip directly to step 5. Do not call MCP again. Do not proceed to step 4.**
 
-**Critical:** A successful `user_get_me` response is conclusive proof that the user IS connected to Senpi. Never treat a successful MCP response as "needs onboarding". Only proceed to step 4 if MCP explicitly rejects the token or the call itself fails technically.
-
-**Writing to `state.json` is only permitted here** (to hydrate an empty cache when MCP confirms READY). All other state transitions are managed by Senpi skills. **No text output.**
+**Rule:** The only signal that onboarding is needed is an **explicit non-READY `state` value** in `state.json` (e.g. `"FRESH"`, `"ONBOARDING"`) — or a failed MCP call in step 2 (which would have stopped execution there). An absent, empty, or `{}` state.json combined with a successful step 2 always means READY. **No text output.**
 
 ## Step 4 — If state is not READY
 
