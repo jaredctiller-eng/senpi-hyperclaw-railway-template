@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR || "/data/.openclaw";
 const WORKSPACE_DIR = process.env.OPENCLAW_WORKSPACE_DIR || "/data/workspace";
@@ -349,6 +350,84 @@ function ensureSenpiStateFile() {
   }
 }
 
+const OPENCLAW_ENTRY =
+  process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
+const OPENCLAW_NODE = process.env.OPENCLAW_NODE?.trim() || "node";
+const IMAGE_SENPI_SCRIPTS_DIR = "/opt/senpi-scripts";
+const SENPI_SCRIPT = path.join(
+  process.env.OPENCLAW_STATE_DIR?.trim() || "/data/.openclaw",
+  "senpi-scripts",
+  "check-skill-updates.py"
+);
+const CRON_JOB_NAME = "senpi-skill-update-check";
+
+/**
+ * Copy Senpi scripts from the image staging dir into $STATE_DIR/senpi-scripts/.
+ * Overwrites on every deploy so scripts stay current with the image.
+ */
+function seedSenpiScripts() {
+  if (!exists(IMAGE_SENPI_SCRIPTS_DIR)) return;
+  const dest = path.join(STATE_DIR, "senpi-scripts");
+  ensureDir(dest);
+  for (const name of fs.readdirSync(IMAGE_SENPI_SCRIPTS_DIR)) {
+    fs.copyFileSync(
+      path.join(IMAGE_SENPI_SCRIPTS_DIR, name),
+      path.join(dest, name)
+    );
+  }
+}
+
+/**
+ * Register the Senpi skill update checker as a daily OpenClaw cron job.
+ * Idempotent: removes any existing job with the same name first.
+ * Only runs when openclaw.json exists (gateway is configured).
+ */
+function registerSkillUpdateCron() {
+  const cfgPath = path.join(STATE_DIR, "openclaw.json");
+  if (!exists(cfgPath)) return;
+  if (!exists(SENPI_SCRIPT)) {
+    console.warn("[bootstrap] Senpi skill update script not found at " + SENPI_SCRIPT + "; skipping cron registration");
+    return;
+  }
+  if (!exists(OPENCLAW_ENTRY)) return;
+
+  const cronEnv = {
+    ...process.env,
+    OPENCLAW_STATE_DIR: STATE_DIR,
+    OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
+  };
+
+  try {
+    execFileSync(OPENCLAW_NODE, [OPENCLAW_ENTRY, "cron", "remove", CRON_JOB_NAME], {
+      env: cronEnv,
+      stdio: "pipe",
+    });
+  } catch {
+    // Job may not exist yet — ignore
+  }
+
+  try {
+    const message =
+      `Run this command with no output or reply: python3 "${SENPI_SCRIPT}" --cron. Then exit. Do not deliver or announce anything.`;
+    execFileSync(
+      OPENCLAW_NODE,
+      [
+        OPENCLAW_ENTRY,
+        "cron", "add",
+        "--name", CRON_JOB_NAME,
+        "--cron", "0 0 * * *",
+        "--session", "isolated",
+        "--no-deliver",
+        "--message", message,
+      ],
+      { env: cronEnv, stdio: "pipe" }
+    );
+    console.log("[bootstrap] Registered Senpi skill update cron job: " + CRON_JOB_NAME);
+  } catch (err) {
+    console.warn("[bootstrap] Failed to register skill update cron: " + err.message);
+  }
+}
+
 export function bootstrapOpenClaw() {
   ensureDir(STATE_DIR);
   ensureDir(WORKSPACE_DIR);
@@ -372,5 +451,7 @@ export function bootstrapOpenClaw() {
   ensureSenpiStateFile();
   writeMcporterConfig();
   seedWorkspaceFiles();
+  seedSenpiScripts();
   patchOpenClawJson();
+  registerSkillUpdateCron();
 }
