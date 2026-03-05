@@ -408,7 +408,10 @@ function registerSkillUpdateCron() {
 
   try {
     const message =
-      `Run python3 "${SENPI_SCRIPT}" and report back the full list of skill updates and new skills found. If there are no updates, say nothing.`;
+      `Run python3 "${SENPI_SCRIPT}". Parse the JSON output and report results as follows:` +
+      ` For each entry in updatedSkills, say "{name}: v{oldVersion} → v{newVersion} — run \`npx skills update\` to apply all updates at once."` +
+      ` For each entry in newSkills, say "New skill: {name} v{version} — {description} — install with \`npx skills add https://github.com/Senpi-ai/senpi-skills --skill {name} -g -y\`".` +
+      ` If both arrays are empty (or heartbeat is HEARTBEAT_OK), say nothing.`;
     execFileSync(
       OPENCLAW_NODE,
       [
