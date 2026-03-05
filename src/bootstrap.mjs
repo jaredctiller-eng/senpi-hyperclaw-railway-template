@@ -424,7 +424,7 @@ function registerSkillUpdateCron() {
     );
     console.log("[bootstrap] Registered Senpi skill update cron job: " + CRON_JOB_NAME);
   } catch (err) {
-    console.warn("[bootstrap] Failed to register skill update cron: " + err.message);
+    throw new Error("[bootstrap] Failed to register skill update cron: " + err.message);
   }
 }
 
