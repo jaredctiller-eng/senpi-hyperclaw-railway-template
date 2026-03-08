@@ -172,6 +172,7 @@ function patchOpenClawJson() {
     "venice/openai-gpt-52": { alias: "GPT-5.2 (Venice)" },
     "venice/deepseek-v3.2": { alias: "DeepSeek V3.2 (Venice)" },
     "venice/qwen3-coder-480b-a35b-instruct": { alias: "Qwen3 Coder (Venice)" },
+    "venice/kimi-k2-5": { alias: "Kimi K2.5 (Venice)" },
     // ── MiniMax ──
     "minimax/MiniMax-M2.1": { alias: "MiniMax M2.1" },
     "minimax/MiniMax-M2.1-lightning": { alias: "MiniMax M2.1 Lightning" },
@@ -231,6 +232,7 @@ function patchOpenClawJson() {
     zai: "zai/glm-5",
     mistral: "mistral/mistral-large-latest",
     minimax: "minimax/MiniMax-M2.1",
+    venice: "venice/llama-3.3-70b",
   };
   if (available.length === 0 && process.env.AI_PROVIDER?.trim() && process.env.AI_API_KEY?.trim()) {
     const aiModel = AI_PROVIDER_MODEL_MAP[process.env.AI_PROVIDER.trim().toLowerCase()];
