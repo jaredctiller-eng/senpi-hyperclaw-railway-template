@@ -59,6 +59,7 @@ export const PROVIDER_TO_AUTH_CHOICE = {
   minimax: "minimax-api",
   synthetic: "synthetic-api-key",
   "opencode-zen": "opencode-zen",
+  venice: "venice-api-key",
 };
 
 export function configPath() {
