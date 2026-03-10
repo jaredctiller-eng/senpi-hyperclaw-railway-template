@@ -13,6 +13,7 @@ import {
   AI_PROVIDER,
   AI_API_KEY,
   PROVIDER_TO_AUTH_CHOICE,
+  resolveEffectiveApiKey,
 } from "./lib/config.js";
 import { resolveGatewayToken } from "./lib/auth.js";
 import { getGatewayProcess, restartGateway } from "./gateway.js";
@@ -66,8 +67,12 @@ const server = app.listen(PORT, () => {
   console.log(`[wrapper] listening on port ${PORT}`);
   console.log(`[wrapper] setup wizard: http://localhost:${PORT}/setup`);
   console.log(`[wrapper] configured: ${isConfigured()}`);
+  const effectiveKey = resolveEffectiveApiKey();
   console.log(`[wrapper] AI_PROVIDER: ${AI_PROVIDER ? `"${AI_PROVIDER}"` : "(not set)"}`);
   console.log(`[wrapper] AI_API_KEY: ${AI_API_KEY ? `set (${AI_API_KEY.length} chars)` : "(not set)"}`);
+  if (!AI_API_KEY && effectiveKey) {
+    console.log(`[wrapper] Effective key: resolved from provider env var (${effectiveKey.length} chars)`);
+  }
   console.log(`[wrapper] canAutoOnboard: ${canAutoOnboard()}`);
 
   if (isConfigured() && shouldReOnboardDueToEnvChange()) {
@@ -117,8 +122,10 @@ const server = app.listen(PORT, () => {
     } else {
       console.log(`[wrapper]   ✓ AI_PROVIDER="${AI_PROVIDER}"`);
     }
-    if (!AI_API_KEY) {
-      console.log("[wrapper]   ✗ AI_API_KEY is not set");
+    if (!AI_API_KEY && !effectiveKey) {
+      console.log("[wrapper]   ✗ AI_API_KEY is not set (no provider-specific key found either)");
+    } else if (!AI_API_KEY && effectiveKey) {
+      console.log(`[wrapper]   ~ AI_API_KEY is not set, but provider key found (${effectiveKey.length} chars)`);
     } else {
       console.log("[wrapper]   ✓ AI_API_KEY is set");
     }

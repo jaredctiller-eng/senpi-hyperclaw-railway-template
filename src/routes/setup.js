@@ -59,7 +59,7 @@ const AUTH_GROUPS = [
     hint: "Gemini API key + Vertex AI + OAuth",
     options: [
       { value: "gemini-api-key", label: "Google Gemini API key" },
-      { value: "google-vertex-api-key", label: "Google Vertex AI API key" },
+      { value: "google-vertex", label: "Google Vertex AI (gcloud ADC)" },
       { value: "google-antigravity", label: "Google Antigravity OAuth" },
       { value: "google-gemini-cli", label: "Google Gemini CLI OAuth" },
     ],

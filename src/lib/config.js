@@ -52,7 +52,7 @@ export const PROVIDER_TO_AUTH_CHOICE = {
   openrouter: "openrouter-api-key",
   gemini: "gemini-api-key",
   google: "gemini-api-key",
-  "google-vertex": "google-vertex-api-key",
+  "google-vertex": "google-vertex",
   "ai-gateway": "ai-gateway-api-key",
   moonshot: "moonshot-api-key",
   "kimi-code": "kimi-code-api-key",
@@ -62,6 +62,44 @@ export const PROVIDER_TO_AUTH_CHOICE = {
   synthetic: "synthetic-api-key",
   "opencode-zen": "opencode-zen",
 };
+
+/** Providers that use ADC/OAuth instead of an API key (AI_API_KEY not required). */
+export const PROVIDERS_WITHOUT_API_KEY = new Set([
+  "google-vertex",
+]);
+
+/**
+ * Map AI_PROVIDER to its provider-specific env var name.
+ * When AI_API_KEY is unset, resolveEffectiveApiKey() falls back to these.
+ */
+const PROVIDER_API_KEY_ENV = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  google: "GEMINI_API_KEY",
+  xai: "XAI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  groq: "GROQ_API_KEY",
+  together: "TOGETHER_API_KEY",
+  zai: "ZAI_API_KEY",
+  moonshot: "MOONSHOT_API_KEY",
+  venice: "VENICE_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  synthetic: "SYNTHETIC_API_KEY",
+  "opencode-zen": "OPENCODE_API_KEY",
+};
+
+/**
+ * Resolve the effective API key for the current AI_PROVIDER.
+ * Priority: AI_API_KEY > provider-specific env var (e.g. VENICE_API_KEY).
+ */
+export function resolveEffectiveApiKey() {
+  if (AI_API_KEY) return AI_API_KEY;
+  const envVar = PROVIDER_API_KEY_ENV[AI_PROVIDER];
+  if (envVar) return stripBearer(process.env[envVar]?.trim() || "");
+  return "";
+}
 
 export function configPath() {
   return (
