@@ -293,6 +293,7 @@ export function buildOnboardArgs(payload, gatewayToken) {
       "minimax-api-lightning": "--minimax-api-key",
       "synthetic-api-key": "--synthetic-api-key",
       "opencode-zen": "--opencode-zen-api-key",
+      "venice-api-key": "--venice-api-key",
     };
     const flag = map[payload.authChoice];
     if (flag && secret) {

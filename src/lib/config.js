@@ -60,6 +60,7 @@ export const PROVIDER_TO_AUTH_CHOICE = {
   minimax: "minimax-api",
   synthetic: "synthetic-api-key",
   "opencode-zen": "opencode-zen",
+  venice: "venice-api-key",
 };
 
 /** Providers that use ADC/OAuth instead of an API key (AI_API_KEY not required). */

@@ -139,6 +139,12 @@ const AUTH_GROUPS = [
       },
     ],
   },
+  {
+    value: "venice",
+    label: "Venice AI",
+    hint: "Privacy-focused API key",
+    options: [{ value: "venice-api-key", label: "Venice AI API key" }],
+  },
 ];
 
 export function createSetupRouter() {
