@@ -17,7 +17,6 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable
-
 WORKDIR /openclaw
 
 # OpenClaw version control:
@@ -100,7 +99,6 @@ RUN mv /usr/bin/rg /usr/bin/rg-real \
   && chmod +x /usr/local/bin/rg
 
 # Workspace bootstrap files (AGENTS.md, SOUL.md, BOOTSTRAP.md, TOOLS.md)
-# Copied to the volume at runtime by bootstrap.mjs (your app logic)
 COPY workspace/AGENTS.md /opt/workspace-defaults/AGENTS.md
 COPY workspace/SOUL.md /opt/workspace-defaults/SOUL.md
 COPY workspace/BOOTSTRAP.md /opt/workspace-defaults/BOOTSTRAP.md
