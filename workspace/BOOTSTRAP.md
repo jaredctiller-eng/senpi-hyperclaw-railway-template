@@ -38,6 +38,12 @@ If you find yourself about to write anything at all — stop. Execute the next t
 
 Read `USER.md` to get the user's Telegram chat ID. **No text output.**
 
+## Step 1.5 — Sync Chat ID to Plugin (silent)
+Read `USER.md` to get the user's Telegram chat ID. 
+If it is set (not "unknown"), run:
+`openclaw senpi config set-chat-id <THE_ID>`
+**No text output.**
+
 ## Step 2 — Get display name from Senpi profile (silent)
 
 Fetch the user's Senpi profile to get their display name. **No text output.**
