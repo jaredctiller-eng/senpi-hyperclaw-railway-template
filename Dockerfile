@@ -77,16 +77,6 @@ RUN npm install -g mcporter@0.7.3 mcp-remote@0.1.38
 # Copy built openclaw
 COPY --from=openclaw-build /openclaw /openclaw
 
-# Install senpi trading-recipe into /opt/senpi-extensions (not OpenClaw's bundled path) so
-# OpenClaw never scans it directly. When OPENCLAW_STATE_DIR is set, bootstrap syncs it into
-# STATE_DIR/extensions; that single copy is the only one OpenClaw sees, avoiding duplicate IDs.
-RUN cd /tmp \
-  && echo '{"name":"plugin-install","dependencies":{"@senpi/trading-recipe":"latest"}}' > package.json \
-  && npm install --omit=dev \
-  && mkdir -p /opt/senpi-extensions \
-  && cp -r node_modules/@senpi/trading-recipe /opt/senpi-extensions/trading-recipe \
-  && cd /opt/senpi-extensions/trading-recipe && npm install --omit=dev \
-  && rm -rf /tmp/node_modules /tmp/package.json /tmp/package-lock.json
 
 # Vendor mcporter skill from the same OpenClaw ref used in build stage (no extra git clone)
 RUN mkdir -p /opt/openclaw-skills

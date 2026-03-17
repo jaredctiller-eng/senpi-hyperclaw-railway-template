@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   DESIRED_MODELS,
   PROVIDER_DEFAULTS,
@@ -20,9 +21,6 @@ const SENPI_TOKEN_FILE = path.join(STATE_DIR, "config", "senpi.token");
 
 const IMAGE_SKILLS_DIR = "/opt/openclaw-skills";
 const STATE_SKILLS_DIR = path.join(STATE_DIR, "skills");
-
-/** Image copy of trading-recipe; not an OpenClaw scan root — bootstrap syncs into state dir. */
-const BUNDLED_EXTENSIONS_DIR = "/opt/senpi-extensions";
 
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
@@ -90,23 +88,6 @@ function deepMerge(target, patch) {
     out[k] = k in out ? deepMerge(out[k], v) : v;
   }
   return out;
-}
-
-/** Read version from trading-recipe package.json (state copy or bundled). Used to populate plugins.installs for update tracking. */
-function getTradingRecipeVersion() {
-  const statePkg = path.join(STATE_DIR, "extensions", "trading-recipe", "package.json");
-  const bundledPkg = path.join(BUNDLED_EXTENSIONS_DIR, "trading-recipe", "package.json");
-  for (const pkgPath of [statePkg, bundledPkg]) {
-    if (!exists(pkgPath)) continue;
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-      const v = pkg?.version;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    } catch {
-      // ignore
-    }
-  }
-  return null;
 }
 
 function patchOpenClawJson() {
@@ -203,19 +184,6 @@ function patchOpenClawJson() {
   // If trading-recipe is disabled, remove it so config stays valid when plugin is not in image
   if (process.env.SENPI_TRADING_RUNTIME_ENABLED === "false" && merged.plugins?.entries) {
     delete merged.plugins.entries["trading-recipe"];
-  }
-
-  // Record trading-recipe in plugins.installs so "openclaw plugins update" works (docs: https://docs.openclaw.ai/cli/plugins)
-  if (process.env.SENPI_TRADING_RUNTIME_ENABLED !== "false" && merged.plugins?.entries?.["trading-recipe"]) {
-    const version = getTradingRecipeVersion();
-    if (version) {
-      merged.plugins = merged.plugins || {};
-      merged.plugins.installs = merged.plugins.installs || {};
-      merged.plugins.installs["trading-recipe"] = {
-        source: "npm",
-        spec: `@senpi/trading-recipe@${version}`,
-      };
-    }
   }
 
   merged.agents = merged.agents || {};
@@ -350,6 +318,34 @@ function ensureSenpiStateFile() {
   }
 }
 
+/**
+ * Install @senpi/trading-recipe via openclaw CLI when config exists and plugin is enabled
+ * but not yet installed. Ensures plugins.installs and state dir are correct for updates.
+ */
+function installTradingRecipePluginIfNeeded() {
+  if (process.env.SENPI_TRADING_RUNTIME_ENABLED === "false") return;
+  const cfgPath = path.join(STATE_DIR, "openclaw.json");
+  if (!exists(cfgPath)) return;
+  const pluginDir = path.join(STATE_DIR, "extensions", "trading-recipe");
+  if (exists(pluginDir)) return;
+
+  ensureDir(path.join(STATE_DIR, "extensions"));
+  const result = spawnSync(
+    "openclaw",
+    ["plugins", "install", "@senpi/trading-recipe", "--pin"],
+    {
+      env: { ...process.env, OPENCLAW_STATE_DIR: STATE_DIR },
+      stdio: "pipe",
+      encoding: "utf8",
+    }
+  );
+  if (result.status !== 0) {
+    console.error("[bootstrap] openclaw plugins install @senpi/trading-recipe failed:", result.stderr || result.stdout);
+    return;
+  }
+  console.log("[bootstrap] trading-recipe plugin installed via openclaw plugins install");
+}
+
 export function bootstrapOpenClaw() {
   ensureDir(STATE_DIR);
   ensureDir(WORKSPACE_DIR);
@@ -370,19 +366,9 @@ export function bootstrapOpenClaw() {
     path.join(STATE_SKILLS_DIR, "mcporter"),
   );
 
-  // When OPENCLAW_STATE_DIR is set: copy trading-recipe from image only when missing, so
-  // the user can run "openclaw plugins update" and that update persists across restarts.
-  // We do not force-overwrite so that explicit updates are not reverted.
-  const stateExtensionsDir = path.join(STATE_DIR, "extensions");
-  const tradingRecipeBundled = path.join(BUNDLED_EXTENSIONS_DIR, "trading-recipe");
-  const tradingRecipeState = path.join(stateExtensionsDir, "trading-recipe");
-  if (process.env.OPENCLAW_STATE_DIR?.trim() && exists(tradingRecipeBundled)) {
-    ensureDir(stateExtensionsDir);
-    copyDirIfMissing(tradingRecipeBundled, tradingRecipeState);
-  }
-
   ensureSenpiStateFile();
   writeMcporterConfig();
   seedWorkspaceFiles();
+  installTradingRecipePluginIfNeeded();
   patchOpenClawJson();
 }
