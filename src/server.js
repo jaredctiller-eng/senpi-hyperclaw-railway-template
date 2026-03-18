@@ -14,6 +14,8 @@ import {
   AI_API_KEY,
   PROVIDER_TO_AUTH_CHOICE,
   resolveEffectiveApiKey,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_USERNAME,
 } from "./lib/config.js";
 import { resolveGatewayToken } from "./lib/auth.js";
 import { getGatewayProcess, restartGateway } from "./gateway.js";
@@ -26,6 +28,7 @@ import {
   AUTO_ONBOARD_FINGERPRINT_FILE,
 } from "./onboard.js";
 import { bootstrapOpenClaw } from "./bootstrap.mjs";
+import { resolveTelegramUserId } from "./lib/telegramId.js";
 import { createSetupRouter } from "./routes/setup.js";
 import {
   controlUiMiddleware,
@@ -101,13 +104,21 @@ const server = app.listen(PORT, () => {
     console.log(
       "[wrapper] Already configured, syncing configs and starting gateway..."
     );
-    try {
-      bootstrapOpenClaw();
-    } catch (err) {
-      console.error(`[wrapper] Bootstrap sync error (non-fatal): ${err}`);
-    }
-    // Restart gateway so it picks up bootstrap patch (e.g. dangerouslyDisableDeviceAuth for cron without pairing)
-    restartGateway(OPENCLAW_GATEWAY_TOKEN).catch((err) => {
+    (async () => {
+      // Resolve Telegram user ID via API BEFORE bootstrap, so allowlist config is correct
+      if (TELEGRAM_BOT_TOKEN && TELEGRAM_USERNAME) {
+        console.log(`[wrapper] Resolving Telegram user ID: ${TELEGRAM_USERNAME}`);
+        await resolveTelegramUserId(TELEGRAM_BOT_TOKEN, TELEGRAM_USERNAME).catch((err) => {
+          console.warn(`[telegram] Pre-bootstrap ID resolution failed (non-fatal): ${err.message}`);
+        });
+      }
+      try {
+        bootstrapOpenClaw();
+      } catch (err) {
+        console.error(`[wrapper] Bootstrap sync error (non-fatal): ${err}`);
+      }
+      await restartGateway(OPENCLAW_GATEWAY_TOKEN);
+    })().catch((err) => {
       console.error(`[wrapper] Gateway startup failed: ${err}`);
     });
   } else {
@@ -137,6 +148,7 @@ const server = app.listen(PORT, () => {
     }
     console.log("[wrapper] ================================================================");
   }
+
 });
 
 attachUpgrade(server);

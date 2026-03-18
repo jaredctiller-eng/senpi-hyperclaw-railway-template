@@ -5,6 +5,8 @@ import {
   PROVIDER_DEFAULTS,
   AI_PROVIDER_MODEL_MAP,
 } from "./lib/models.js";
+import { readCachedTelegramId, writeCachedTelegramId } from "./lib/telegramId.js";
+import { TELEGRAM_USERNAME } from "./lib/config.js";
 
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR || "/data/.openclaw";
 const WORKSPACE_DIR = process.env.OPENCLAW_WORKSPACE_DIR || "/data/workspace";
@@ -94,13 +96,41 @@ function patchOpenClawJson() {
       trustedProxies: ["127.0.0.1", "::1"],
     },
     channels: {
-      telegram: {
-        enabled: true,
-        dmPolicy: "open",
-        allowFrom: ["*"],
-        streamMode: "block",
-        blockStreaming: true,
-      },
+      telegram: (() => {
+        const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
+        // Resolve numeric ID: env is numeric, or read from cache file
+        console.log(`[bootstrap] TELEGRAM_USERNAME: ${TELEGRAM_USERNAME}`);
+        let numericId = /^\d+$/.test(TELEGRAM_USERNAME) ? TELEGRAM_USERNAME : readCachedTelegramId();
+        // Fallback: recover ID from existing config (survives redeploy on persistent volume)
+        if (!numericId) {
+          const existingAllowFrom = cfg.channels?.telegram?.allowFrom;
+          if (Array.isArray(existingAllowFrom) && existingAllowFrom.length > 0) {
+            const existing = String(existingAllowFrom[0]);
+            if (/^\d+$/.test(existing)) {
+              numericId = existing;
+              writeCachedTelegramId(numericId);
+              console.log(`[bootstrap] Telegram: recovered ID ${numericId} from existing config`);
+            }
+          }
+        }
+        console.log(`[bootstrap] numericId: ${numericId}`);
+        const base = {
+          enabled: true,
+          streamMode: "block",
+          blockStreaming: true,
+        };
+        if (numericId) {
+          base.dmPolicy = "allowlist";
+          base.allowFrom = [numericId];
+          console.log(`[bootstrap] Telegram dmPolicy: allowlist (ID: ${numericId})`);
+        } else {
+          base.dmPolicy = "pairing";
+          if (TELEGRAM_BOT_TOKEN) {
+            console.warn("[bootstrap] Telegram: no cached user ID — using dmPolicy 'pairing' as safe fallback. Send /start to the bot and redeploy.");
+          }
+        }
+        return base;
+      })(),
     },
     plugins: {
       entries: {

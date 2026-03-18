@@ -25,6 +25,7 @@ import { tokenLogSafe } from "./lib/auth.js";
 import { runCmd } from "./lib/runCmd.js";
 import { clawArgs, ensureGatewayRunning, restartGateway } from "./gateway.js";
 import { bootstrapOpenClaw } from "./bootstrap.mjs";
+import { readCachedTelegramId, writeCachedTelegramId } from "./lib/telegramId.js";
 
 const AUTO_ONBOARD_FINGERPRINT_FILE = path.join(
   STATE_DIR,
@@ -77,6 +78,7 @@ export function canAutoOnboard() {
  * Resolve Telegram user to chat ID and write USER.md. Preserves existing sections (e.g. Trading Profile).
  */
 export async function resolveTelegramAndWriteUserMd() {
+  console.log(`[telegram] resolveTelegramAndWriteUserMd`);
   let chatId = "";
   let username = "";
   let updateList = [];
@@ -91,6 +93,7 @@ export async function resolveTelegramAndWriteUserMd() {
   let existingExtra = "";
   let existingChatId = "";
   try {
+    console.log(`[telegram] reading USER.md`);
     const existing = fs.readFileSync(userMdPath, "utf8");
     const chatIdMatch = existing.match(/^- Chat ID:\s*(\d+)/m);
     if (chatIdMatch) {
@@ -100,11 +103,13 @@ export async function resolveTelegramAndWriteUserMd() {
     if (telegramSectionEnd !== -1) {
       existingExtra = existing.slice(telegramSectionEnd);
     }
-  } catch {
+  } catch (err) {
+    console.warn(`[telegram] Error reading USER.md: ${err.message}`);
     // No existing USER.md
   }
 
   try {
+    console.log(`[telegram] verifying bot token`);
     const meRes = await fetch(
       `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`
     );
@@ -116,40 +121,50 @@ export async function resolveTelegramAndWriteUserMd() {
     console.log(`[telegram] Bot verified: @${me.result.username}`);
 
     if (TELEGRAM_USERNAME) {
+      console.log(`[telegram] TELEGRAM_USERNAME: ${TELEGRAM_USERNAME}`);
       if (/^\d+$/.test(TELEGRAM_USERNAME)) {
         chatId = TELEGRAM_USERNAME;
+        console.log(`[telegram] Using TELEGRAM_USERNAME (numeric): ${chatId}`);
+        writeCachedTelegramId(chatId);
         console.log(
           `[telegram] Using TELEGRAM_USERNAME (numeric): ${chatId}`
         );
       } else {
         username = TELEGRAM_USERNAME.replace(/^@/, "").toLowerCase();
+        console.log(`[telegram] Resolving username: ${username}`);
+        // Clear any existing webhook — getUpdates returns empty while a webhook is active
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook`);
         const updatesRes = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=100`
         );
         const updates = await updatesRes.json();
+        console.log(`[telegram] updates: ${JSON.stringify(updates)}`);
         updateList = (updates.ok && updates.result) || [];
-
+        console.log(`[telegram] updateList: ${JSON.stringify(updateList)}`);
         for (const update of updateList) {
           const chat = update.message?.chat || update.my_chat_member?.chat;
           const from = update.message?.from || update.my_chat_member?.from;
           if (chat?.username?.toLowerCase() === username) {
             chatId = String(chat.id);
+            console.log(`[telegram] Found username in chat: ${chatId}`);
             break;
           }
           if (from?.username?.toLowerCase() === username) {
             chatId = String(chat?.id || from?.id);
+            console.log(`[telegram] Found username in from: ${chatId}`);
             break;
           }
         }
 
         if (chatId) {
+          console.log(`[telegram] Writing cached ID: ${chatId}`);
+          writeCachedTelegramId(chatId);
           console.log(`[telegram] Resolved @${username} → chat ID ${chatId}`);
         } else if (existingChatId) {
           chatId = existingChatId;
-          console.log(
-            `[telegram] getUpdates empty — reusing previously resolved chat ID ${chatId} for @${username}`
-          );
+          console.log(`[telegram] Falling back to previously resolved chat ID ${chatId}`);
         } else {
+          console.warn(`[telegram] Could not resolve @${username} — the user must message the bot first so the chat ID can be discovered.`);
           console.warn(
             `[telegram] Could not resolve @${username} — the user must message the bot first so the chat ID can be discovered.`
           );
@@ -174,6 +189,7 @@ export async function resolveTelegramAndWriteUserMd() {
           update.chat_member?.chat;
         if (chat?.id) {
           chatId = String(chat.id);
+          writeCachedTelegramId(chatId);
           const from =
             update.message?.from ||
             update.edited_message?.from ||
@@ -313,8 +329,13 @@ export function buildOnboardArgs(payload, gatewayToken) {
  * @param {string} gatewayToken - OPENCLAW_GATEWAY_TOKEN
  */
 export async function autoOnboard(gatewayToken) {
+  console.log(`[auto-onboard] autoOnboard`);
+  // Ensure state directory exists before telegram resolution (cache write needs it)
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+console.log(`[auto-onboard] directory created`);
   if (TELEGRAM_BOT_TOKEN && TELEGRAM_USERNAME) {
     await resolveTelegramAndWriteUserMd();
+    console.log(`[auto-onboard] telegram resolved and written`);
   }
 
   if (!canAutoOnboard()) {
@@ -467,15 +488,18 @@ export async function autoOnboard(gatewayToken) {
           "[auto-onboard] Telegram not supported by this build, skipping"
         );
       } else {
+        const resolvedId = readCachedTelegramId();
         const cfgObj = {
           enabled: true,
-          dmPolicy: "open",
-          allowFrom: ["*"],
+          dmPolicy: resolvedId ? "allowlist" : "pairing",
+          ...(resolvedId ? { allowFrom: [resolvedId] } : {}),
           botToken: TELEGRAM_BOT_TOKEN,
           groupPolicy: "allowlist",
           streamMode: "block",
           blockStreaming: true,
         };
+        console.log(`[auto-onboard] Telegram dmPolicy: ${cfgObj.dmPolicy}${resolvedId ? ` (ID: ${resolvedId})` : " (no cached ID, using pairing fallback)"}`);
+
         const set = await runCmd(
           OPENCLAW_NODE,
           clawArgs([
