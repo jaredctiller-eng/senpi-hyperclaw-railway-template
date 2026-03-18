@@ -56,11 +56,28 @@ export async function resolveTelegramUserId(botToken, username) {
 
   try {
     // Clear any existing webhook — getUpdates returns empty while a webhook is active
-    await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
-    const res = await fetch(
-      `https://api.telegram.org/bot${botToken}/getUpdates?limit=100`
-    );
-    const data = await res.json();
+    const whRes = await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
+    const whData = await whRes.json().catch(() => ({}));
+    console.log(`[telegram] deleteWebhook result: ${JSON.stringify(whData)}`);
+    if (!whData.ok) {
+      console.warn(`[telegram] deleteWebhook failed — getUpdates may return empty`);
+    }
+
+    // Brief delay to let Telegram process the webhook deletion
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Retry loop: old gateway polling (from previous deploy) may still be consuming updates
+    let data = { ok: false, result: [] };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) await new Promise((r) => setTimeout(r, 2000));
+      const res = await fetch(
+        `https://api.telegram.org/bot${botToken}/getUpdates?limit=100`
+      );
+      data = await res.json();
+      console.log(`[telegram] getUpdates attempt ${attempt}: ${data.result?.length ?? 0} updates`);
+      if (data.ok && Array.isArray(data.result) && data.result.length > 0) break;
+    }
+
     if (!data.ok || !Array.isArray(data.result)) return "";
 
     const lc = clean.toLowerCase();
