@@ -133,12 +133,24 @@ export async function resolveTelegramAndWriteUserMd() {
         username = TELEGRAM_USERNAME.replace(/^@/, "").toLowerCase();
         console.log(`[telegram] Resolving username: ${username}`);
         // Clear any existing webhook — getUpdates returns empty while a webhook is active
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook`);
-        const updatesRes = await fetch(
-          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=100`
-        );
-        const updates = await updatesRes.json();
-        console.log(`[telegram] updates: ${JSON.stringify(updates)}`);
+        const whRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook`);
+        const whData = await whRes.json().catch(() => ({}));
+        console.log(`[telegram] deleteWebhook result: ${JSON.stringify(whData)}`);
+
+        // Brief delay to let Telegram process the webhook deletion
+        await new Promise((r) => setTimeout(r, 1000));
+
+        // Retry loop: old gateway may still be polling
+        let updates = { ok: false, result: [] };
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          if (attempt > 1) await new Promise((r) => setTimeout(r, 2000));
+          const updatesRes = await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=100`
+          );
+          updates = await updatesRes.json();
+          console.log(`[telegram] getUpdates attempt ${attempt}: ${JSON.stringify(updates)}`);
+          if (updates.ok && updates.result?.length > 0) break;
+        }
         updateList = (updates.ok && updates.result) || [];
         console.log(`[telegram] updateList: ${JSON.stringify(updateList)}`);
         for (const update of updateList) {
@@ -174,6 +186,9 @@ export async function resolveTelegramAndWriteUserMd() {
 
     if (!chatId) {
       if (updateList.length === 0) {
+        // Ensure webhook is cleared for this fallback path too
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook`);
+        await new Promise((r) => setTimeout(r, 1000));
         const updatesRes = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=50`
         );
@@ -489,10 +504,19 @@ console.log(`[auto-onboard] directory created`);
         );
       } else {
         const resolvedId = readCachedTelegramId();
+        let existingAllowFrom = [];
+        try {
+          const existingCfg = JSON.parse(fs.readFileSync(configPath(), "utf8")).channels?.telegram;
+          existingAllowFrom = Array.isArray(existingCfg?.allowFrom) ? existingCfg.allowFrom : [];
+        } catch {}
+        const rawMerged = resolvedId
+          ? [...new Set([...existingAllowFrom, resolvedId])]
+          : [...existingAllowFrom];
+        const mergedAllowFrom = rawMerged.some((id) => id !== "*") ? rawMerged.filter((id) => id !== "*") : rawMerged;
         const cfgObj = {
           enabled: true,
-          dmPolicy: resolvedId ? "allowlist" : "pairing",
-          ...(resolvedId ? { allowFrom: [resolvedId] } : {}),
+          dmPolicy: mergedAllowFrom.length > 0 ? "allowlist" : "pairing",
+          ...(mergedAllowFrom.length > 0 ? { allowFrom: mergedAllowFrom } : {}),
           botToken: TELEGRAM_BOT_TOKEN,
           groupPolicy: "allowlist",
           streamMode: "block",
