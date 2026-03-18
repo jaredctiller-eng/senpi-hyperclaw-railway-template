@@ -332,26 +332,6 @@ export function createSetupRouter() {
           ])
         );
 
-        // Ensure the default agent list exists for tool routing.
-        await runCmd(
-          OPENCLAW_NODE,
-          clawArgs([
-            "config",
-            "set",
-            "--json",
-            "agents.list",
-            JSON.stringify([
-              {
-                id: "main",
-                tools: {
-                  profile: "full",
-                  allow: ["llm-task", "message"],
-                },
-              },
-            ]),
-          ])
-        );
-
         const channelsHelp = await runCmd(
           OPENCLAW_NODE,
           clawArgs(["channels", "add", "--help"])

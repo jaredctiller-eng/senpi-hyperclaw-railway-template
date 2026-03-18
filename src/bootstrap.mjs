@@ -78,6 +78,17 @@ function copyDirIfMissing(srcDir, dstDir) {
   fs.cpSync(srcDir, dstDir, { recursive: true });
 }
 
+/** When missing, OpenClaw may not expose llm-task/message for the main agent. */
+const DEFAULT_AGENTS_LIST = [
+  {
+    id: "main",
+    tools: {
+      profile: "full",
+      allow: ["llm-task", "message"],
+    },
+  },
+];
+
 function deepMerge(target, patch) {
   if (Array.isArray(target) || Array.isArray(patch)) return patch;
   if (typeof target !== "object" || target === null) return patch;
@@ -211,6 +222,12 @@ function patchOpenClawJson() {
     console.log(
       `[bootstrap] Default model: ${available[0].model} (fallbacks: ${available.slice(1).map((p) => p.model).join(", ") || "none"})`
     );
+  }
+
+  // CLI `config set agents.list` is unreliable across builds; write directly whenever we patch config.
+  if (!Array.isArray(merged.agents.list) || merged.agents.list.length === 0) {
+    merged.agents.list = structuredClone(DEFAULT_AGENTS_LIST);
+    console.log("[bootstrap] Set agents.list (main: llm-task, message)");
   }
 
   // tools.fs is not supported in OpenClaw 2026.2.12; remove if present (e.g. from prior bootstrap).
