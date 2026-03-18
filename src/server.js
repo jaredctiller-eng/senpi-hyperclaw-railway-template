@@ -107,6 +107,7 @@ const server = app.listen(PORT, () => {
     (async () => {
       // Resolve Telegram user ID via API BEFORE bootstrap, so allowlist config is correct
       if (TELEGRAM_BOT_TOKEN && TELEGRAM_USERNAME) {
+        console.log(`[wrapper] Resolving Telegram user ID: ${TELEGRAM_USERNAME}`);
         await resolveTelegramUserId(TELEGRAM_BOT_TOKEN, TELEGRAM_USERNAME).catch((err) => {
           console.warn(`[telegram] Pre-bootstrap ID resolution failed (non-fatal): ${err.message}`);
         });

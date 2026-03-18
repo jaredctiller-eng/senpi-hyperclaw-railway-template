@@ -36,13 +36,20 @@ export function writeCachedTelegramId(id) {
  * @returns {Promise<string>} numeric ID or ""
  */
 export async function resolveTelegramUserId(botToken, username) {
-  if (!botToken || !username) return "";
+  if (!botToken || !username) {
+    console.warn(`[telegram] resolveTelegramUserId error: botToken or username is not set`);
+    return "";
+  }
 
   const clean = username.replace(/^@/, "").trim();
-  if (!clean) return "";
+  if (!clean) {
+    console.warn(`[telegram] resolveTelegramUserId error: username is empty`);
+    return "";
+  }
 
   // Already numeric — use directly
   if (/^\d+$/.test(clean)) {
+    console.log(`[telegram] resolveTelegramUserId: username is already numeric: ${clean}`);
     writeCachedTelegramId(clean);
     return clean;
   }
@@ -55,17 +62,23 @@ export async function resolveTelegramUserId(botToken, username) {
     if (!data.ok || !Array.isArray(data.result)) return "";
 
     const lc = clean.toLowerCase();
+    console.log(`[telegram] resolveTelegramUserId: searching for username: ${lc}`);
+    console.log(`[telegram] resolveTelegramUserId: data.result: ${JSON.stringify(data.result)}`);
     for (const update of data.result) {
       const chat = update.message?.chat || update.my_chat_member?.chat;
       const from = update.message?.from || update.my_chat_member?.from;
       if (chat?.username?.toLowerCase() === lc) {
+        console.log(`[telegram] resolveTelegramUserId: found username in chat: ${chat.username}`);
         const id = String(chat.id);
+        console.log(`[telegram] resolveTelegramUserId: writing cached ID: ${id}`);
         writeCachedTelegramId(id);
         console.log(`[telegram] Async resolved @${clean} → ${id}`);
         return id;
       }
       if (from?.username?.toLowerCase() === lc) {
+        console.log(`[telegram] resolveTelegramUserId: found username in from: ${from.username}`);
         const id = String(chat?.id || from?.id);
+        console.log(`[telegram] resolveTelegramUserId: writing cached ID: ${id}`);
         writeCachedTelegramId(id);
         console.log(`[telegram] Async resolved @${clean} → ${id}`);
         return id;

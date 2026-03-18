@@ -99,7 +99,9 @@ function patchOpenClawJson() {
         const TELEGRAM_USERNAME = process.env.TELEGRAM_USERNAME?.trim() || "";
         const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
         // Resolve numeric ID: env is numeric, or read from cache file
+        console.log(`[bootstrap] TELEGRAM_USERNAME: ${TELEGRAM_USERNAME}`);
         let numericId = /^\d+$/.test(TELEGRAM_USERNAME) ? TELEGRAM_USERNAME : readCachedTelegramId();
+        console.log(`[bootstrap] numericId: ${numericId}`);
         const base = {
           enabled: true,
           streamMode: "block",
