@@ -165,15 +165,7 @@ function patchOpenClawJson() {
         // Resolve numeric ID: env is numeric, or read from cache file
         console.log(`[bootstrap] TELEGRAM_USERNAME: ${TELEGRAM_USERNAME}`);
         let numericId = /^\d+$/.test(TELEGRAM_USERNAME) ? TELEGRAM_USERNAME : readCachedTelegramId();
-        // Fallback: recover ID from USER.md (persisted from a previous successful resolution)
-        if (!numericId) {
-          numericId = readChatIdFromUserMd();
-          if (numericId) {
-            writeCachedTelegramId(numericId);
-            console.log(`[bootstrap] Telegram: recovered ID ${numericId} from USER.md`);
-          }
-        }
-        // Fallback: recover ID from existing config (survives redeploy on persistent volume)
+        // Fallback chain: existing config allowFrom → USER.md chat ID
         if (!numericId) {
           const existingAllowFrom = cfg.channels?.telegram?.allowFrom;
           if (Array.isArray(existingAllowFrom) && existingAllowFrom.length > 0) {
@@ -183,6 +175,14 @@ function patchOpenClawJson() {
               writeCachedTelegramId(numericId);
               console.log(`[bootstrap] Telegram: recovered ID ${numericId} from existing config`);
             }
+          }
+        }
+        if (!numericId) {
+          const userMdId = readChatIdFromUserMd();
+          if (userMdId) {
+            numericId = userMdId;
+            writeCachedTelegramId(numericId);
+            console.log(`[bootstrap] Telegram: recovered ID ${numericId} from USER.md`);
           }
         }
         console.log(`[bootstrap] numericId: ${numericId}`);
@@ -201,6 +201,7 @@ function patchOpenClawJson() {
           console.log(`[bootstrap] Telegram dmPolicy: allowlist (ID: ${numericId})`);
         } else {
           base.dmPolicy = "pairing";
+          base.allowFrom = ["*"];
           if (TELEGRAM_BOT_TOKEN) {
             console.warn("[bootstrap] Telegram: no cached user ID — using dmPolicy 'pairing' as safe fallback. Send /start to the bot and redeploy.");
           }
