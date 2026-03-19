@@ -37,7 +37,7 @@ This repo packages **Openclaw** for Railway with **zero-touch auto-configuration
 | `SENPI_AUTH_TOKEN` | Yes | Senpi authentication token for MCP |
 | `OPENCLAW_STATE_DIR` | Recommended | Set to `/data/.openclaw` for persistence |
 | `OPENCLAW_WORKSPACE_DIR` | Recommended | Set to `/data/workspace` for persistence |
-| `TELEGRAM_USERNAME` | Optional | @username or chat ID so the agent can message the right user; if unset, wrapper may use latest getUpdates chat |
+| `TELEGRAM_USERNAME` | Optional | @username or chat ID so the agent can message the right user; if unset, wrapper may use latest getUpdates chat. `TELEGRAM_USERID` is accepted as an alias (checked first). |
 | `OPENCLAW_GATEWAY_TOKEN` | Optional | Stable gateway auth token (auto-generated if unset) |
 | `SETUP_PASSWORD` | Recommended | Password for `/setup` and Control UI (/, /openclaw). If unset, those routes are disabled and a startup warning is logged. |
 
@@ -61,6 +61,7 @@ Set `AI_PROVIDER` to one of the following values, and put the corresponding API 
 | `zai` | Z.AI (GLM 4.7) | Z.AI API key |
 | `minimax` | MiniMax (M2.1) | MiniMax API key |
 | `synthetic` | Synthetic (Anthropic-compatible) | Synthetic API key |
+| `venice` | Venice AI (private, uncensored models) | Venice API key |
 | `opencode-zen` | OpenCode Zen (multi-model proxy) | OpenCode Zen API key |
 
 **Example** (Anthropic):
@@ -94,7 +95,7 @@ The workspace is preloaded with prompts that guide **end users** (people chattin
 - **First trade guide** — When the user is ready, the agent walks them through discovery, opening a small position ($50, 3x), and closing, then suggests skills (DSL, WOLF, Whale Index, etc.).
 - **Skills** — Users can list and install skills via `npx skills add Senpi-ai/senpi-skills --list` and `npx skills add Senpi-ai/senpi-skills --skill <skill-name> -a openclaw`.
 
-See [ONBOARDING_GUIDE.md](ONBOARDING_GUIDE.md) and [docs/ONBOARDING_ARCHITECTURE.md](docs/ONBOARDING_ARCHITECTURE.md) for the full design.
+See [BOOTSTRAP.md](workspace/BOOTSTRAP.md) for the agent startup flow and [CLAUDE.md](CLAUDE.md) for the full architecture.
 
 ## Local smoke test
 

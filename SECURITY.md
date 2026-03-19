@@ -12,19 +12,20 @@ This document summarizes how this template aligns with [OpenClaw’s security gu
 
 ## What we do well (aligned with OpenClaw security)
 
-| Area | Implementation | Reference |
-|------|----------------|-----------|
-| **Gateway bind** | `gateway.bind: "loopback"` — gateway only listens on localhost | [Network exposure](https://docs.openclaw.ai/gateway/security#04-network-exposure-bind--port--firewall) |
-| **Gateway auth** | Token auth required; token synced from wrapper to `openclaw.json`; no `auth.mode: "none"` | [Lock down Gateway WebSocket](https://docs.openclaw.ai/gateway/security#05-lock-down-the-gateway-websocket-local-auth) |
-| **Reverse proxy** | `gateway.trustedProxies: ["127.0.0.1", "::1"]` so the wrapper is trusted; we do **not** set `allowRealIpFallback` | [Reverse Proxy Configuration](https://docs.openclaw.ai/gateway/security#reverse-proxy-configuration) |
-| **Wrapper auth** | All proxy and Control UI routes require Basic auth with `SETUP_PASSWORD`; 401/500 when unset | [Security architecture](https://docs.openclaw.ai/gateway/security) |
-| **Token injection** | Gateway token injected by wrapper only after request is authenticated; clients never need to know it (Control UI gets it via server-side fetch + script injection) | Same |
-| **Token logging** | Only fingerprint (hash prefix) and length are logged; actual token is redacted in command logs | [Logs + redaction](https://docs.openclaw.ai/gateway/security#08-logs--transcripts-redaction--retention) |
-| **Token strength** | Auto-generated token is 32 bytes (64 hex chars); short tokens from env/file are warned (see below) | [hooks.token_too_short](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
-| **Debug endpoint** | `GET /setup/api/debug` returns 404 unless `OPENCLAW_TEMPLATE_DEBUG=true` **and** requires setup auth; response does not include the gateway token | [Insecure/dangerous flags](https://docs.openclaw.ai/gateway/security#insecure-or-dangerous-flags-summary) |
-| **Backup export** | `/setup/export` excludes sensitive paths: `gateway.token`, `openclaw.json`, `mcporter.json` | [Secrets on disk](https://docs.openclaw.ai/gateway/security#07-secrets-on-disk-whats-sensitive) |
-| **Senpi token API** | `POST /setup/api/senpi-token` is restricted to localhost (`127.0.0.1`, `::1`) | Reduce blast radius |
-| **Control UI token** | `/setup/api/gateway-token` is protected by `requireSetupAuth` and `Cache-Control: no-store` | — |
+| Area | Implementation | File(s) | Reference |
+|------|----------------|---------|-----------|
+| **Gateway bind** | `gateway.bind: "loopback"` — gateway only listens on localhost | src/gateway.js, src/bootstrap.mjs | [Network exposure](https://docs.openclaw.ai/gateway/security#04-network-exposure-bind--port--firewall) |
+| **Gateway auth** | Token auth required; token synced from wrapper to `openclaw.json`; no `auth.mode: "none"` | src/lib/auth.js, src/gateway.js | [Lock down Gateway WebSocket](https://docs.openclaw.ai/gateway/security#05-lock-down-the-gateway-websocket-local-auth) |
+| **Reverse proxy** | `gateway.trustedProxies: ["127.0.0.1", "::1"]` so the wrapper is trusted; we do **not** set `allowRealIpFallback` | src/bootstrap.mjs, src/onboard.js | [Reverse Proxy Configuration](https://docs.openclaw.ai/gateway/security#reverse-proxy-configuration) |
+| **Wrapper auth** | All proxy and Control UI routes require Basic auth with `SETUP_PASSWORD`; 401/500 when unset | src/lib/auth.js (`createRequireSetupAuth`, `createCheckProxyAuth`) | [Security architecture](https://docs.openclaw.ai/gateway/security) |
+| **Token injection** | Gateway token injected by wrapper only after request is authenticated; clients never need to know it (Control UI gets it via server-side fetch + script injection) | src/routes/proxy.js | Same |
+| **Token logging** | Only fingerprint (hash prefix) and length are logged; actual token is redacted in command logs | src/lib/auth.js (`tokenLogSafe`) | [Logs + redaction](https://docs.openclaw.ai/gateway/security#08-logs--transcripts-redaction--retention) |
+| **Token strength** | Auto-generated token is 32 bytes (64 hex chars); short tokens from env/file are warned | src/lib/auth.js (`resolveGatewayToken`) | [hooks.token_too_short](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
+| **Debug endpoint** | `GET /setup/api/debug` returns 404 unless `OPENCLAW_TEMPLATE_DEBUG=true` **and** requires setup auth; response does not include the gateway token | src/routes/setup.js | [Insecure/dangerous flags](https://docs.openclaw.ai/gateway/security#insecure-or-dangerous-flags-summary) |
+| **Backup export** | `/setup/export` excludes sensitive paths: `gateway.token`, `openclaw.json`, `mcporter.json`, `*.token` | src/routes/setup.js | [Secrets on disk](https://docs.openclaw.ai/gateway/security#07-secrets-on-disk-whats-sensitive) |
+| **Senpi token API** | `POST /setup/api/senpi-token` is restricted to localhost (`127.0.0.1`, `::1`) | src/routes/setup.js | Reduce blast radius |
+| **Control UI token** | `/setup/api/gateway-token` is protected by `requireSetupAuth` and `Cache-Control: no-store` | src/routes/setup.js | — |
+| **Device auth auto-approval** | Only pending loopback operator devices are auto-approved (remote IP must be 127.0.0.1/::1) | src/lib/deviceAuth.js | — |
 
 ---
 
@@ -32,8 +33,8 @@ This document summarizes how this template aligns with [OpenClaw’s security gu
 
 | Item | Why we use it | Doc |
 |------|----------------|-----|
-| **`gateway.controlUi.allowInsecureAuth: true`** | Required so the Control UI works behind our reverse proxy without device pairing. The wrapper already enforces Basic auth and injects the gateway token; device identity is not needed. | [Control UI over HTTP](https://docs.openclaw.ai/gateway/security#control-ui-over-http), [gateway.control_ui.insecure_auth](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
-| **`gateway.controlUi.dangerouslyDisableDeviceAuth: true`** | Headless deployment: there is no device to pair. Internal clients (Telegram provider, cron, session WebSocket) connect from 127.0.0.1 with the gateway token from config; without this they get `code=1008 reason=connect failed` / "pairing required" and cron/notifications fail. | [gateway.control_ui.device_auth_disabled](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
+| **`gateway.controlUi.allowInsecureAuth: true`** | Required so the Control UI works behind our reverse proxy without device pairing. The wrapper already enforces Basic auth and injects the gateway token; device identity is not needed. Set in src/bootstrap.mjs, src/onboard.js, src/gateway.js, src/routes/setup.js. | [Control UI over HTTP](https://docs.openclaw.ai/gateway/security#control-ui-over-http), [gateway.control_ui.insecure_auth](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
+| **`gateway.controlUi.dangerouslyDisableDeviceAuth: true`** | Headless deployment: there is no device to pair. Internal clients (Telegram provider, cron, session WebSocket) connect from 127.0.0.1 with the gateway token from config; without this they get `code=1008 reason=connect failed` / "pairing required" and cron/notifications fail. Set in the same four files. Additionally, `src/lib/deviceAuth.js` runs a polling loop that auto-approves pending loopback operator devices as a defense-in-depth measure. | [gateway.control_ui.device_auth_disabled](https://docs.openclaw.ai/gateway/security#security-audit-glossary) |
 
 Running `openclaw security audit` in the container will flag both. Treat them as accepted for this deployment pattern (wrapper auth + token injection; no local CLI/device).
 
@@ -64,8 +65,18 @@ Running `openclaw security audit` in the container will flag both. Treat them as
 
 ### 5. **Tools / exec**
 
-- **What:** `bootstrap.mjs` sets `tools.exec.security: "full"` and `ask: "off"` so MCP and tools don’t wait for manual approval in a headless environment. This broadens the blast radius of prompt injection if an attacker can reach the agent.
+- **What:** `src/bootstrap.mjs` sets `tools.exec.security: "full"` and `ask: "off"` so MCP and tools don’t wait for manual approval in a headless environment. This broadens the blast radius of prompt injection if an attacker can reach the agent.
 - **Recommendation:** Align with [Prompt injection](https://docs.openclaw.ai/gateway/security#prompt-injection-what-it-is-why-it-matters): restrict who can message the bot (pairing/allowlists), use a strong model, and consider denying high-risk tools for untrusted channels. The template does not change tool allow/deny lists; configure those in OpenClaw config or workspace prompts as needed.
+
+### 6. **Session clearing on restart**
+
+- **What:** `src/gateway.js` clears all session data files (`clearAllSessions()`) on every gateway restart. This prevents stale context errors but means sessions don't survive restarts.
+- **Risk:** Low — sessions are ephemeral by design in this deployment model. Agent memory persists via workspace files (MEMORY.md, memory/ directory).
+
+### 7. **Telegram allowlist**
+
+- **What:** When a Telegram chat ID is resolved (via `TELEGRAM_USERNAME`/`TELEGRAM_USERID`, getUpdates, or cache), the template sets `dmPolicy: "allowlist"` with that ID (src/onboard.js, src/bootstrap.mjs). When no ID is available, falls back to `dmPolicy: "pairing"`.
+- **Recommendation:** Always set `TELEGRAM_USERNAME` or `TELEGRAM_USERID` to a known chat ID and send `/start` to the bot before deploying. This ensures the allowlist is populated and unknown users cannot message the bot.
 
 ---
 

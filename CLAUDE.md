@@ -85,7 +85,18 @@ Internet → Railway → Wrapper (auth: Basic SETUP_PASSWORD) → [if auth OK] i
 
 ### Key Files
 
-- **src/server.js** (main entry): Express wrapper, proxy setup, gateway lifecycle management, configuration persistence (server logic only - no inline HTML/CSS)
+- **src/server.js** (thin entry point): Composes config, auth, gateway, onboarding, setup routes, proxy; Express app creation, `server.listen`, SIGTERM handler
+- **src/gateway.js**: Gateway lifecycle — `startGateway`, `ensureGatewayRunning`, `restartGateway`, `waitForGatewayReady`, `clawArgs`, `getGatewayProcess`; session lock/data clearing, MCP health check
+- **src/onboard.js**: Auto-onboarding — `autoOnboard`, `canAutoOnboard`, `buildOnboardArgs`, `resolveTelegramAndWriteUserMd`, `envFingerprintForOnboard`, `shouldReOnboardDueToEnvChange`
+- **src/bootstrap.mjs**: Bootstrap OpenClaw config — patches `openclaw.json` (models, agents, tools, gateway, channels, hooks), writes mcporter MCP config, seeds workspace prompt files, ensures Senpi state file
+- **src/routes/setup.js**: Setup wizard & API — `createSetupRouter()` returns Express router for `/setup`, `/setup/healthz`, `/setup/api/*`, `/setup/export`
+- **src/routes/proxy.js**: Gateway proxy — HTTP proxy, Control UI HTML interception (token script injection), catch-all middleware, WebSocket upgrade handler
+- **src/lib/config.js**: Environment and paths — constants, env-derived values, `PROVIDER_TO_AUTH_CHOICE`, `resolveEffectiveApiKey()`, `configPath()`, `isConfigured()`
+- **src/lib/auth.js**: Auth helpers — `tokenLogSafe`, `secureCompare`, `resolveGatewayToken`, `createRequireSetupAuth`, `createCheckProxyAuth`
+- **src/lib/runCmd.js**: `runCmd(cmd, args, opts)` — spawns process with env overrides, returns `{ code, output }`
+- **src/lib/deviceAuth.js**: Auto-approval of pending loopback operator devices — burst+steady polling loop after gateway start
+- **src/lib/models.js**: AI model catalog (`DESIRED_MODELS`), provider defaults (`PROVIDER_DEFAULTS`), provider-to-model mapping (`AI_PROVIDER_MODEL_MAP`)
+- **src/lib/telegramId.js**: Telegram user-ID resolution via Bot API and caching — `resolveTelegramUserId`, `readCachedTelegramId`, `writeCachedTelegramId`, `readChatIdFromUserMd`
 - **src/public/** (static assets for setup wizard):
   - **setup.html**: Setup wizard HTML structure
   - **styles.css**: Setup wizard styling (extracted from inline styles)
@@ -94,7 +105,7 @@ Internet → Railway → Wrapper (auth: Basic SETUP_PASSWORD) → [if auth OK] i
 
 ### Environment Variables
 
-**Required (for zero-touch):** AI_PROVIDER, AI_API_KEY, TELEGRAM_*, etc. (see README)
+**Required (for zero-touch):** `AI_PROVIDER`, `AI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `SENPI_AUTH_TOKEN` (see README)
 
 **Recommended:**
 
@@ -110,39 +121,58 @@ Internet → Railway → Wrapper (auth: Basic SETUP_PASSWORD) → [if auth OK] i
 - `OPENCLAW_GATEWAY_TOKEN` — auth token for gateway (auto-generated if unset)
 - `PORT` — wrapper HTTP port (default 8080)
 - `INTERNAL_GATEWAY_PORT` — gateway internal port (default 18789)
+- `INTERNAL_GATEWAY_HOST` — gateway internal host (default `127.0.0.1`)
+- `GATEWAY_READY_TIMEOUT_MS` — how long to wait for gateway readiness (default `20000`)
 - `OPENCLAW_ENTRY` — path to `entry.js` (default `/openclaw/dist/entry.js`)
+- `OPENCLAW_NODE` — node binary for running openclaw CLI (default `node`)
+- `OPENCLAW_CONFIG_PATH` — override config file location (default `${STATE_DIR}/openclaw.json`)
+- `OPENCLAW_TEMPLATE_DEBUG` — set to `true` to enable `/setup/api/debug` endpoint
+- `TELEGRAM_USERID` — alias for `TELEGRAM_USERNAME` (checked first)
+- `SENPI_MCP_URL` — Senpi MCP endpoint (default `https://mcp.dev.senpi.ai/mcp`)
+- `MCPORTER_CONFIG` — path to mcporter config (default `${STATE_DIR}/config/mcporter.json`)
 
 ### Authentication Flow
 
 The wrapper manages a **two-layer auth scheme**:
 
-1. **Setup wizard auth**: Basic auth with `SETUP_PASSWORD` (src/server.js:190)
-2. **Gateway auth**: Bearer token with multi-source resolution and automatic sync
-   - **Token resolution order** (src/server.js:25-55):
-     1. `OPENCLAW_GATEWAY_TOKEN` env variable (highest priority) ✅
+1. **Setup wizard auth**: Basic auth with `SETUP_PASSWORD` via `createRequireSetupAuth()` (src/lib/auth.js)
+2. **Proxy/Control UI auth**: Basic auth with `SETUP_PASSWORD` via `createCheckProxyAuth()` (src/lib/auth.js)
+3. **Gateway auth**: Bearer token with multi-source resolution and automatic sync
+   - **Token resolution order** — `resolveGatewayToken()` (src/lib/auth.js):
+     1. `OPENCLAW_GATEWAY_TOKEN` env variable (highest priority)
      2. Persisted file at `${STATE_DIR}/gateway.token`
-     3. Generate new random token and persist
+     3. Generate new random token (32 bytes hex) and persist
    - **Token synchronization**:
-     - During onboarding: Synced to `openclaw.json` with verification (src/server.js:478-511)
-     - Every gateway start: Synced to `openclaw.json` with verification (src/server.js:120-143)
+     - During onboarding: Synced to `openclaw.json` with verification (src/onboard.js `autoOnboard`, src/routes/setup.js `/api/run`)
+     - Every gateway start: Synced to `openclaw.json` with verification (src/gateway.js `startGateway`)
      - Reason: Openclaw gateway reads token from config file, not from `--token` flag
    - **Token injection**:
-     - HTTP requests: via `proxy.on("proxyReq")` event handler (src/server.js:761)
-     - WebSocket upgrades: via `proxy.on("proxyReqWs")` event handler (src/server.js:766)
+     - HTTP requests: via `proxy.on("proxyReq")` event handler (src/routes/proxy.js)
+     - WebSocket upgrades: via `proxy.on("proxyReqWs")` event handler (src/routes/proxy.js)
+     - WebSocket `upgrade` event: direct `req.headers.authorization` replacement (src/routes/proxy.js `attachUpgrade`)
 
 ### Onboarding Process
 
-When the user runs setup (src/server.js:447-650):
+**Manual setup** — via `/setup/api/run` (src/routes/setup.js):
 
-1. Calls `openclaw onboard --non-interactive` with user-selected auth provider and `--gateway-token` flag
-2. **Syncs wrapper token to `openclaw.json`** (overwrites whatever `onboard` generated):
+1. Calls `openclaw onboard --non-interactive` via `buildOnboardArgs()` (src/onboard.js)
+2. Syncs wrapper token, gateway config, and channel configs
+3. Runs `bootstrapOpenClaw()` (src/bootstrap.mjs) and restarts gateway
+
+**Auto-onboard** — via `autoOnboard()` (src/onboard.js):
+
+1. Resolves Telegram user ID and writes USER.md (`resolveTelegramAndWriteUserMd`)
+2. Calls `openclaw onboard --non-interactive` with env-derived auth provider and `--gateway-token` flag
+3. **Syncs wrapper token to `openclaw.json`** (overwrites whatever `onboard` generated):
    - Sets `gateway.auth.token` to `OPENCLAW_GATEWAY_TOKEN` env variable
    - Verifies sync succeeded by reading config file back
-   - Logs warning/error if mismatch detected
-3. Writes channel configs (Telegram/Discord/Slack) directly to `openclaw.json` via `openclaw config set --json`
-4. Force-sets gateway config to use token auth + loopback bind + allowInsecureAuth
-5. Restarts gateway process to apply all config changes
-6. Waits for gateway readiness (polls multiple endpoints)
+   - Throws on mismatch
+4. Writes channel configs (Telegram) directly via `openclaw config set --json`
+5. Force-sets gateway config: token auth, loopback bind, port, allowInsecureAuth, dangerouslyDisableDeviceAuth, trustedProxies
+6. Runs `bootstrapOpenClaw()` (src/bootstrap.mjs) — patches openclaw.json with models, hooks, tools config
+7. Restarts gateway and writes env fingerprint for redeploy detection
+
+**Re-onboard** — triggered on startup when `shouldReOnboardDueToEnvChange()` detects env fingerprint mismatch (src/server.js).
 
 **Important**: Channel setup bypasses `openclaw channels add` and writes config directly because `channels add` is flaky across different Openclaw builds.
 
@@ -150,16 +180,17 @@ When the user runs setup (src/server.js:447-650):
 
 The wrapper **always** injects the bearer token into proxied requests so browser clients don't need to know it:
 
-- HTTP requests: via `proxy.on("proxyReq")` event handler (src/server.js:736)
-- WebSocket upgrades: via `proxy.on("proxyReqWs")` event handler (src/server.js:741)
+- HTTP requests: via `proxy.on("proxyReq")` event handler (src/routes/proxy.js)
+- WebSocket upgrades: via `proxy.on("proxyReqWs")` event handler (src/routes/proxy.js)
+- WebSocket `upgrade`: via `attachUpgrade()` — replaces `req.headers.authorization` after Basic auth check (src/routes/proxy.js)
 
-**Important**: Token injection uses `http-proxy` event handlers (`proxyReq` and `proxyReqWs`) rather than direct `req.headers` modification. Direct header modification does not reliably work with WebSocket upgrades, causing intermittent `token_missing` or `token_mismatch` errors.
+**Important**: Token injection for the HTTP proxy uses `http-proxy` event handlers (`proxyReq` and `proxyReqWs`) rather than direct `req.headers` modification. Direct header modification does not reliably work with WebSocket upgrades, causing intermittent `token_missing` or `token_mismatch` errors.
 
-This allows the Control UI at `/openclaw` to work without user authentication.
+The Control UI at `/openclaw` works without the user knowing the gateway token — the wrapper fetches upstream HTML, injects a `<script>` that auto-fills the token into localStorage/cookie/input fields, and auto-clicks Connect (src/routes/proxy.js `controlUiHandler`).
 
 ### Backup Export
 
-`GET /setup/export` (src/server.js):
+`GET /setup/export` (src/routes/setup.js):
 
 - Creates a `.tar.gz` archive of `STATE_DIR` and `WORKSPACE_DIR`
 - **Excludes secrets:** `gateway.token`, `openclaw.json`, `mcporter.json`, and `*.token` files are not included
@@ -176,38 +207,47 @@ This allows the Control UI at `/openclaw` to work without user authentication.
 ### Testing authentication
 
 - Setup wizard: Clear browser auth, verify Basic auth challenge
-- Gateway: Remove `Authorization` header injection (src/server.js:736) and verify requests fail
+- Gateway: Remove `Authorization` header injection in `proxy.on("proxyReq")` (src/routes/proxy.js) and verify requests fail
 
 ### Debugging gateway startup
 
 Check logs for:
 
-- `[gateway] starting with command: ...` (src/server.js:142)
-- `[gateway] ready at <endpoint>` (src/server.js:100)
-- `[gateway] failed to become ready after 20000ms` (src/server.js:109)
+- `[gateway] starting with command: ...` (src/gateway.js `startGateway`)
+- `[gateway] ready at <endpoint>` (src/gateway.js `waitForGatewayReady`)
+- `[gateway] failed to become ready after 20000ms` (src/gateway.js `waitForGatewayReady`)
+- `[gateway] MCP health check: OK/FAIL` (src/gateway.js `checkMcpHealth`)
+- `[deviceAuth] Auto-approval loop started` (src/lib/deviceAuth.js)
 
 If gateway doesn't start:
 
 - Verify `openclaw.json` exists and is valid JSON
 - Check `STATE_DIR` and `WORKSPACE_DIR` are writable
 - Ensure bearer token is set in config
+- Check for stale session locks (auto-cleared on startup by `clearStaleSessionLocks` in src/gateway.js)
 
 ### Modifying onboarding args
 
-Edit `buildOnboardArgs()` (src/server.js:442-496) to add new CLI flags or auth providers.
+Edit `buildOnboardArgs()` in src/onboard.js to add new CLI flags or auth providers. Update `PROVIDER_TO_AUTH_CHOICE` in src/lib/config.js for new provider mappings.
 
 ### Adding new channel types
 
 1. Add channel-specific fields to `/setup` HTML (src/public/setup.html)
-2. Add config-writing logic in `/setup/api/run` handler (src/server.js)
+2. Add config-writing logic in `/setup/api/run` handler (src/routes/setup.js)
 3. Update client JS to collect the fields (src/public/setup-app.js)
+4. Add auto-onboard channel config in `autoOnboard()` (src/onboard.js)
+5. Update bootstrap patch in `patchOpenClawJson()` (src/bootstrap.mjs)
+
+### Modifying models or provider defaults
+
+Edit src/lib/models.js — `DESIRED_MODELS` for the allowlist, `PROVIDER_DEFAULTS` for env-var-based defaults, `AI_PROVIDER_MODEL_MAP` for `AI_PROVIDER` fallback mapping. Bootstrap merges these into `openclaw.json` on every startup.
 
 ## Railway Deployment Notes
 
 - Template must mount a volume at `/data`
 - **Recommended:** set `SETUP_PASSWORD` in Railway Variables so `/setup` and Control UI (/, /openclaw) are accessible. If unset, those routes return 500 and a startup warning is logged.
 - Public networking must be enabled (assigns `*.up.railway.app` domain)
-- Openclaw version is pinned via Docker build arg `OPENCLAW_GIT_REF` (default: `v2026.2.12`). We use a pre-2026.2.19 version (e.g. 2026.2.6, 2026.2.9, 2026.2.12) to avoid the scope tightening that causes cron/agent to hit "pairing required"; see [releases](https://github.com/openclaw/openclaw/releases). For 2026.2.22 pairing fixes (loopback operator scopes, auto-approve) use `OPENCLAW_GIT_REF=v2026.2.22`.
+- Openclaw version is pinned via Docker build arg `OPENCLAW_VERSION` (default: `v2026.2.22`). The Dockerfile falls back to `v2026.2.22` if the arg is not set. For older versions (e.g. 2026.2.12), some features like `tools.fs` are not supported and are stripped by bootstrap. See [releases](https://github.com/openclaw/openclaw/releases).
 
 ## Serena Semantic Coding
 
@@ -233,13 +273,20 @@ This avoids repeatedly reading large files and provides instant context about th
 
 ## Quirks & Gotchas
 
-1. **Gateway token must be stable across redeploys** → Always set `OPENCLAW_GATEWAY_TOKEN` env variable in Railway (highest priority); token is synced to `openclaw.json` during onboarding (src/server.js:478-511) and on every gateway start (src/server.js:120-143) with verification. This is required because `openclaw onboard` generates its own random token and the gateway reads from config file, not from `--token` CLI flag. Sync failures throw errors and prevent gateway startup.
+1. **Gateway token must be stable across redeploys** → Always set `OPENCLAW_GATEWAY_TOKEN` env variable in Railway (highest priority); token is synced to `openclaw.json` during onboarding (src/onboard.js `autoOnboard`) and on every gateway start (src/gateway.js `startGateway`) with verification. This is required because `openclaw onboard` generates its own random token and the gateway reads from config file, not from `--token` CLI flag. Sync failures throw errors and prevent gateway startup.
 2. **Channels are written via `config set --json`, not `channels add`** → avoids CLI version incompatibilities
-3. **Gateway readiness check polls multiple endpoints** (`/openclaw`, `/`, `/health`) → some builds only expose certain routes (src/server.js:92)
-4. **Discord bots require MESSAGE CONTENT INTENT** → document this in setup wizard (src/server.js:295-298)
-5. **Gateway spawn inherits stdio** → logs appear in wrapper output (src/server.js:134)
-6. **WebSocket auth requires proxy event handlers** → Direct `req.headers` modification doesn't work for WebSocket upgrades with http-proxy; must use `proxyReqWs` event (src/server.js:741) to reliably inject Authorization header
-7. **Control UI and headless internal clients** → We set `gateway.controlUi.allowInsecureAuth=true` (Control UI behind proxy) and `gateway.controlUi.dangerouslyDisableDeviceAuth=true` (headless: no device to pair). The latter is required so internal clients (Telegram provider, cron, session WS) connecting from 127.0.0.1 with the token from config are not rejected with `code=1008 reason=connect failed` / "pairing required". Both are set in bootstrap.mjs, onboard.js, gateway.js sync, and setup.js post-onboard.
-8. **"pairing required" / "connect failed" (1008)** → If you still see this after the above: check that `openclaw.json` has `gateway.controlUi.dangerouslyDisableDeviceAuth: true` and restart the gateway (redeploy or restart the process). Wrapper logs `[ws-upgrade]` only for browser→wrapper→gateway; internal client failures appear in gateway logs as `[ws] closed before connect ... code=1008 reason=connect failed`.
-9. **`[tools] read failed: ENOENT ... access '/openclaw/src/...'`** → The agent tried to read a path outside the workspace (e.g. OpenClaw source). Bootstrap sets `tools.fs.workspaceOnly: true` so read/write/edit are limited to the workspace (e.g. `/data/workspace`). Redeploy so the patched config is applied; then the agent won't hit ENOENT on system paths.
+3. **Gateway readiness check polls multiple endpoints** (`/openclaw`, `/`, `/health`) → some builds only expose certain routes (src/gateway.js `waitForGatewayReady`)
+4. **Discord bots require MESSAGE CONTENT INTENT** → document this in setup wizard
+5. **Gateway spawn pipes stdout/stderr** → logs appear in wrapper output (src/gateway.js `startGateway`); stderr tail (last 4KB) is captured and logged on non-zero exit
+6. **WebSocket auth requires proxy event handlers** → Direct `req.headers` modification doesn't work for WebSocket upgrades with http-proxy; must use `proxyReqWs` event (src/routes/proxy.js) to reliably inject Authorization header
+7. **Control UI and headless internal clients** → We set `gateway.controlUi.allowInsecureAuth=true` (Control UI behind proxy) and `gateway.controlUi.dangerouslyDisableDeviceAuth=true` (headless: no device to pair). The latter is required so internal clients (Telegram provider, cron, session WS) connecting from 127.0.0.1 with the token from config are not rejected with `code=1008 reason=connect failed` / "pairing required". Both are set in src/bootstrap.mjs, src/onboard.js, src/gateway.js, and src/routes/setup.js post-onboard.
+8. **"pairing required" / "connect failed" (1008)** → If you still see this after the above: check that `openclaw.json` has `gateway.controlUi.dangerouslyDisableDeviceAuth: true` and restart the gateway (redeploy or restart the process). The wrapper also runs an auto-approval loop (src/lib/deviceAuth.js) that continuously approves pending loopback operator devices. Wrapper logs `[ws-upgrade]` only for browser→wrapper→gateway; internal client failures appear in gateway logs as `[ws] closed before connect ... code=1008 reason=connect failed`.
+9. **`[tools] read failed: ENOENT ... access '/openclaw/src/...'`** → The agent tried to read a path outside the workspace (e.g. OpenClaw source). Note: `tools.fs.workspaceOnly` is NOT supported on OpenClaw 2026.2.12 — bootstrap strips this field if present (src/bootstrap.mjs). For newer builds, enable it manually.
 10. **`[telegram] sendChatAction failed: Network request for 'sendChatAction' failed!`** → Telegram API call (e.g. "typing…" indicator) failed. Usually transient (network, rate limit, or egress). If persistent, check TELEGRAM_BOT_TOKEN and egress to api.telegram.org. Chat delivery can still work when sendChatAction fails.
+11. **Session data cleared on every gateway restart** → `clearAllSessions()` (src/gateway.js) deletes all session files to prevent stale context errors like "No tool call found for function call output".
+12. **Device auth auto-approval loop** → After gateway becomes ready, `startAutoApprovalLoop()` (src/lib/deviceAuth.js) polls `openclaw devices list` with a burst+steady schedule (aggressive for ~60s, then once per minute) and auto-approves any pending loopback operator devices.
+13. **`TELEGRAM_USERID` takes precedence** → src/lib/config.js reads `TELEGRAM_USERID` first, then falls back to `TELEGRAM_USERNAME`. Both are accepted as @username or numeric chat ID.
+14. **Provider-specific API key fallback** → If `AI_API_KEY` is not set, `resolveEffectiveApiKey()` (src/lib/config.js) checks provider-specific env vars (e.g. `ANTHROPIC_API_KEY`, `VENICE_API_KEY`) based on `AI_PROVIDER`.
+15. **Managed workspace files overwritten on deploy** → AGENTS.md, SOUL.md, BOOTSTRAP.md, TOOLS.md in the workspace are always overwritten from `/opt/workspace-defaults` by `seedWorkspaceFiles()` (src/bootstrap.mjs). Non-managed files (e.g. USER.md, MEMORY.md) are preserved.
+16. **Bootstrap creates Senpi state file** → `ensureSenpiStateFile()` (src/bootstrap.mjs) creates `~/.config/senpi/state.json` with `{}` if absent, so the agent's BOOTSTRAP.md can read it without ENOENT.
+17. **MCP health check after gateway ready** → `checkMcpHealth()` (src/gateway.js) runs a fire-and-forget `mcporter call senpi.user_get_me` to verify MCP connectivity.
