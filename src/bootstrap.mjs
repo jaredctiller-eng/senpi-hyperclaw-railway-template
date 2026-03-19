@@ -112,6 +112,20 @@ function patchOpenClawJson() {
   // Remove any invalid keys that would cause gateway startup to fail.
   delete cfg.mcpServers;
 
+  // Union with existing allow so user-installed plugins stay permitted (deepMerge replaces arrays).
+  const existingPluginAllow = Array.isArray(cfg.plugins?.allow)
+    ? cfg.plugins.allow.map((id) => String(id).trim()).filter(Boolean)
+    : [];
+  const bootstrapPluginAllow =
+    process.env.SENPI_TRADING_RUNTIME_ENABLED !== "false"
+      ? ["telegram", "trading-recipe"]
+      : ["telegram"];
+  let pluginsAllow = [...new Set([...existingPluginAllow, ...bootstrapPluginAllow])];
+  // Match entries cleanup: do not keep trading-recipe in allow when runtime is disabled.
+  if (process.env.SENPI_TRADING_RUNTIME_ENABLED === "false") {
+    pluginsAllow = pluginsAllow.filter((id) => id !== "trading-recipe");
+  }
+
   const patch = {
     agents: {
       defaults: {
@@ -195,6 +209,8 @@ function patchOpenClawJson() {
       })(),
     },
     plugins: {
+      // Always include telegram (+ trading-recipe when enabled); preserve any other ids from config.
+      allow: pluginsAllow,
       entries: (() => {
         const entries = { telegram: { enabled: true } };
         // Only add trading-recipe if enabled (set SENPI_TRADING_RUNTIME_ENABLED=false to omit when plugin is not in image)
