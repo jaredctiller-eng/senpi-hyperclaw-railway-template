@@ -2,7 +2,7 @@
 builder = "dockerfile"
 
 [deploy]
-# We have removed the healthcheck lines to stop Railway from killing the bot
+# We removed the healthcheck lines entirely to stop the restart loop
 restartPolicyType = "on_failure"
 startCommand = "node /openclaw/dist/entry.js gateway run --bind auto --port 8080 --auth token --token $OPENCLAW_GATEWAY_TOKEN"
 
