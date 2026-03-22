@@ -2,7 +2,7 @@
 builder = "dockerfile"
 
 [deploy]
-healthcheckPath = "/setup/healthz"
+healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 
@@ -15,3 +15,4 @@ OPENCLAW_ENTRY = "/openclaw/dist/entry.js"
 OPENCLAW_STATE_DIR = "/data/.openclaw"
 OPENCLAW_WORKSPACE_DIR = "/data/workspace"
 SENPI_MCP_URL = "https://mcp.prod.senpi.ai/mcp"
+OPENCLAW_SKIP_CONFIG_SYNC = "true"
