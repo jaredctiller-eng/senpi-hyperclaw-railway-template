@@ -72,7 +72,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 
 # Install MCPorter CLI so the mcporter skill can execute it (pinned for reproducible builds)
-RUN npm install -g mcporter@0.7.3 mcp-remote@0.1.38 @openclaw/skills
+RUN npm install -g mcporter@0.7.3 mcp-remote@0.1.38
 
 # Copy built openclaw
 COPY --from=openclaw-build /openclaw /openclaw
