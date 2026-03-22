@@ -6,7 +6,7 @@ healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 # This bypasses the broken variable and the wizard
-startCommand = "node /openclaw/dist/entry.js gateway run --bind 0.0.0.0 --port 8080 --auth token --token $OPENCLAW_GATEWAY_TOKEN"
+startCommand = "node /openclaw/dist/entry.js gateway run --bind auto --port 8080 --auth token --token $OPENCLAW_GATEWAY_TOKEN"
 
 [variables]
 PORT = "8080"
